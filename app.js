@@ -6,29 +6,17 @@
 // ---------------------------------------------------------------------------
 // 1. CONFIGURACIÓN — reemplaza con tus credenciales
 // ---------------------------------------------------------------------------
-const firebaseConfig = // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyDtcevV_5Hal52mdNK1Am__aQ1l9Y1FyMo",
-  authDomain: "bullblack-visitas.firebaseapp.com",
-  projectId: "bullblack-visitas",
-  storageBucket: "bullblack-visitas.firebasestorage.app",
-  messagingSenderId: "319954973940",
-  appId: "1:319954973940:web:e22c96fa20596af6c9daa1",
-  measurementId: "G-5T4R7JJ0B4"
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROYECTO",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "TU_SENDER_ID",
+  appId: "TU_APP_ID"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 // Correo del administrador (BullBlack) — actualizar cuando lo tengas
-const ADMIN_EMAIL = "lucas.montecinos.alarcon@gmail.com"; // TODO: reemplazar
+const ADMIN_EMAIL = "admin@bullblack.cl"; // TODO: reemplazar
 
 // EmailJS — https://www.emailjs.com (plan gratuito 200/mes)
 const EMAILJS_CONFIG = {
@@ -40,6 +28,18 @@ const EMAILJS_CONFIG = {
 // ---------------------------------------------------------------------------
 // 2. INICIALIZACIÓN
 // ---------------------------------------------------------------------------
+
+// Valida si las credenciales aún son placeholders
+const CONFIG_OK =
+  firebaseConfig.apiKey &&
+  !firebaseConfig.apiKey.startsWith("TU_") &&
+  firebaseConfig.projectId &&
+  !firebaseConfig.projectId.startsWith("TU_");
+
+if (!CONFIG_OK) {
+  console.error("⚠️ firebaseConfig tiene valores placeholder. Reemplaza con los datos reales de tu proyecto Firebase.");
+}
+
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -47,6 +47,32 @@ const db = firebase.firestore();
 // Inicializa EmailJS si está disponible
 if (window.emailjs && EMAILJS_CONFIG.publicKey !== "TU_EMAILJS_PUBLIC_KEY") {
   emailjs.init(EMAILJS_CONFIG.publicKey);
+}
+
+// Mapea códigos de error de Firebase a mensajes claros en español
+function traducirErrorFirebase(err) {
+  const code = err?.code || "";
+  const msg = err?.message || String(err);
+
+  const mapa = {
+    "auth/invalid-api-key":           "La API key de Firebase no es válida. Revisa firebaseConfig en app.js.",
+    "auth/api-key-not-valid":         "La API key de Firebase no es válida. Revisa firebaseConfig en app.js.",
+    "auth/invalid-credential":        "Correo o contraseña incorrectos.",
+    "auth/wrong-password":            "Contraseña incorrecta.",
+    "auth/user-not-found":            "No existe una cuenta con ese correo. Debes registrarte primero.",
+    "auth/email-already-in-use":      "Ese correo ya está registrado. Intenta iniciar sesión.",
+    "auth/weak-password":             "La contraseña es muy débil (mínimo 6 caracteres).",
+    "auth/invalid-email":             "El correo ingresado no es válido.",
+    "auth/too-many-requests":         "Demasiados intentos fallidos. Espera unos minutos.",
+    "auth/network-request-failed":    "Sin conexión al servidor de Firebase. Revisa tu internet.",
+    "auth/operation-not-allowed":     "El método Email/Password NO está habilitado. Ve a Firebase → Authentication → Sign-in method → Email/Password → Enable.",
+    "auth/configuration-not-found":   "Firebase Authentication no está habilitado en tu proyecto. Ve a Firebase → Authentication → Get started.",
+    "permission-denied":              "Firestore bloqueó la operación por reglas de seguridad. Revisa las reglas en Firebase → Firestore → Rules (ver README).",
+    "unavailable":                    "Firestore no está disponible. ¿Creaste la base de datos en Firebase → Firestore → Create database?",
+    "not-found":                      "No se encontró la base de datos de Firestore. Créala en Firebase → Firestore Database → Create database."
+  };
+
+  return mapa[code] || `${code ? `[${code}] ` : ""}${msg}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,39 +147,81 @@ async function registrarCliente({ email, password, displayName }) {
   const nombreNormalizado = displayName.trim();
   const nombreKey = nombreNormalizado.toLowerCase();
 
+  console.log("[registro] 1/5 verificando nombre distintivo...");
+
   // Verificar unicidad del nombre distintivo
-  const nombreDoc = await db.collection("nombresRegistrados").doc(nombreKey).get();
-  if (nombreDoc.exists) {
-    throw new Error("Ese nombre distintivo ya está en uso. Elige otro.");
+  try {
+    const nombreDoc = await db.collection("nombresRegistrados").doc(nombreKey).get();
+    if (nombreDoc.exists) {
+      throw new Error("Ese nombre distintivo ya está en uso. Elige otro.");
+    }
+  } catch (e) {
+    if (e.code === "permission-denied") {
+      throw new Error("Firestore rechazó la lectura. Verifica las reglas (ver README). Código: permission-denied.");
+    }
+    if (!e.message?.includes("nombre distintivo")) {
+      console.error("[registro] error verificando nombre:", e);
+      throw new Error(traducirErrorFirebase(e));
+    }
+    throw e;
   }
 
+  console.log("[registro] 2/5 creando cuenta en Firebase Auth...");
+
   // Crear usuario en Firebase Auth
-  const cred = await auth.createUserWithEmailAndPassword(email, password);
+  let cred;
+  try {
+    cred = await auth.createUserWithEmailAndPassword(email, password);
+  } catch (e) {
+    console.error("[registro] error Auth:", e);
+    throw new Error(traducirErrorFirebase(e));
+  }
+
   const uid = cred.user.uid;
+  console.log("[registro] 3/5 usuario Auth creado:", uid);
 
-  // Actualizar perfil de Auth
-  await cred.user.updateProfile({ displayName: nombreNormalizado });
+  // A partir de aquí, si algo falla, limpiamos el usuario Auth para no dejar
+  // una cuenta huérfana sin perfil
+  try {
+    await cred.user.updateProfile({ displayName: nombreNormalizado });
 
-  // Determinar rol
-  const rol = (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ? "admin" : "cliente";
+    console.log("[registro] 4/5 guardando perfil en Firestore...");
 
-  // Crear documento de usuario
-  await db.collection("users").doc(uid).set({
-    email: email.toLowerCase(),
-    displayName: nombreNormalizado,
-    displayNameKey: nombreKey,
-    rol,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
+    // Determinar rol
+    const rol = (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ? "admin" : "cliente";
 
-  // Crear índice nombre → email
-  await db.collection("nombresRegistrados").doc(nombreKey).set({
-    email: email.toLowerCase(),
-    uid,
-    displayName: nombreNormalizado
-  });
+    await db.collection("users").doc(uid).set({
+      email: email.toLowerCase(),
+      displayName: nombreNormalizado,
+      displayNameKey: nombreKey,
+      rol,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
 
-  return cred.user;
+    console.log("[registro] 5/5 guardando índice de nombre...");
+
+    await db.collection("nombresRegistrados").doc(nombreKey).set({
+      email: email.toLowerCase(),
+      uid,
+      displayName: nombreNormalizado
+    });
+
+    console.log("[registro] ✓ completo. Rol asignado:", rol);
+    return cred.user;
+
+  } catch (e) {
+    console.error("[registro] Falló escritura en Firestore, eliminando cuenta Auth...", e);
+    try { await cred.user.delete(); } catch (delErr) {
+      console.error("[registro] No se pudo eliminar cuenta Auth:", delErr);
+    }
+    if (e.code === "permission-denied") {
+      throw new Error("Firestore rechazó la escritura por reglas de seguridad. Copia las reglas del README en Firebase → Firestore → Rules → Publicar.");
+    }
+    if (e.code === "unavailable" || e.code === "not-found") {
+      throw new Error("La base de datos Firestore no existe. Ve a Firebase → Firestore Database → Create database.");
+    }
+    throw new Error(traducirErrorFirebase(e));
+  }
 }
 
 /**
@@ -163,16 +231,30 @@ async function loginFlexible(identificador, password) {
   const id = identificador.trim();
   let email = id;
 
+  console.log("[login] identificador:", id.includes("@") ? "correo" : "nombre distintivo");
+
   // Si no parece un email, buscarlo por nombre distintivo
   if (!id.includes("@")) {
-    const snap = await db.collection("nombresRegistrados").doc(id.toLowerCase()).get();
-    if (!snap.exists) {
-      throw new Error("No existe un usuario con ese nombre distintivo.");
+    try {
+      const snap = await db.collection("nombresRegistrados").doc(id.toLowerCase()).get();
+      if (!snap.exists) {
+        throw new Error("No existe un usuario con ese nombre distintivo.");
+      }
+      email = snap.data().email;
+      console.log("[login] nombre resuelto a correo:", email);
+    } catch (e) {
+      if (e.message?.includes("nombre distintivo")) throw e;
+      console.error("[login] error buscando nombre:", e);
+      throw new Error(traducirErrorFirebase(e));
     }
-    email = snap.data().email;
   }
 
-  return auth.signInWithEmailAndPassword(email, password);
+  try {
+    return await auth.signInWithEmailAndPassword(email, password);
+  } catch (e) {
+    console.error("[login] error auth:", e);
+    throw new Error(traducirErrorFirebase(e));
+  }
 }
 
 async function logout() {

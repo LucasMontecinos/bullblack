@@ -19,6 +19,8 @@
       <div class="auth-logo-sub">Automatización · Seguridad</div>
     </div>
 
+    <div id="config-warning"></div>
+
     <div class="card">
       <div class="tabs">
         <button class="tab active" data-tab="login">Iniciar sesión</button>
@@ -70,18 +72,20 @@
       </form>
     </div>
 
-    <p class="text-muted text-sm mt-6" style="text-align:center;">
-      Servicio de visitas técnicas · Lun–Dom · 07:30 – 20:00
-    </p>
+    <div class="row-between mt-6" style="padding: 0 8px;">
+      <span class="text-muted text-sm">Lun–Dom · 07:30 – 20:00</span>
+      <button class="btn btn-ghost btn-sm" onclick="diagnosticar()" title="Probar configuración de Firebase">🔧 Diagnóstico</button>
+    </div>
+
+    <div id="diag-box" class="hidden mt-4"></div>
 
   </div>
 </div>
 
-<!-- Firebase compat SDK (funciona 100% en GitHub Pages) -->
+<!-- Firebase compat SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<!-- EmailJS -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="app.js"></script>
 
@@ -90,6 +94,19 @@
   const loginForm  = document.getElementById("login-form");
   const regForm    = document.getElementById("register-form");
   const alertBox   = document.getElementById("alert-box");
+  const configWarn = document.getElementById("config-warning");
+  const diagBox    = document.getElementById("diag-box");
+
+  // Verificar config al cargar
+  if (!CONFIG_OK) {
+    configWarn.innerHTML = `
+      <div class="alert alert-error" style="margin-bottom:16px;">
+        <strong>⚠️ Configuración incompleta</strong><br>
+        El archivo <code>app.js</code> aún tiene los valores <code>TU_API_KEY</code> etc.
+        Debes pegar las credenciales reales de tu proyecto Firebase antes de poder registrar/iniciar sesión.
+        Ver <strong>README.md sección 2</strong>.
+      </div>`;
+  }
 
   tabs.forEach(t => t.addEventListener("click", () => {
     tabs.forEach(x => x.classList.remove("active"));
@@ -107,8 +124,13 @@
   // Si ya está autenticado, redirige
   auth.onAuthStateChanged(async (user) => {
     if (user) {
+      console.log("[authstate] usuario detectado:", user.email);
       const profile = await getUserProfileAwait(user.uid);
-      if (profile && profile.rol === "admin") {
+      if (!profile) {
+        console.warn("[authstate] usuario sin perfil en Firestore. Permaneciendo en login.");
+        return;
+      }
+      if (profile.rol === "admin") {
         window.location.href = "admin.html";
       } else {
         window.location.href = "reservar.html";
@@ -126,17 +148,9 @@
       const id = document.getElementById("login-id").value;
       const pass = document.getElementById("login-pass").value;
       await loginFlexible(id, pass);
-      // onAuthStateChanged redirige
     } catch (err) {
-      let msg = err.message;
-      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        msg = "Contraseña incorrecta.";
-      } else if (err.code === "auth/user-not-found") {
-        msg = "No existe una cuenta con ese correo.";
-      } else if (err.code === "auth/too-many-requests") {
-        msg = "Demasiados intentos. Espera unos minutos.";
-      }
-      mostrarAlerta(alertBox, msg, "error");
+      console.error("[login form] error:", err);
+      mostrarAlerta(alertBox, err.message || String(err), "error");
       btn.disabled = false; btn.textContent = "Entrar";
     }
   });
@@ -164,21 +178,75 @@
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creando...';
     try {
       await registrarCliente({ email, password: pass, displayName: name });
-      // onAuthStateChanged redirige
+      mostrarAlerta(alertBox, "Cuenta creada con éxito. Redirigiendo...", "success");
     } catch (err) {
-      let msg = err.message;
-      if (err.code === "auth/email-already-in-use") {
-        msg = "Ese correo ya está registrado. Intenta iniciar sesión.";
-      } else if (err.code === "auth/weak-password") {
-        msg = "La contraseña es muy débil (mínimo 6 caracteres).";
-      } else if (err.code === "auth/invalid-email") {
-        msg = "El correo ingresado no es válido.";
-      }
-      mostrarAlerta(alertBox, msg, "error");
+      console.error("[register form] error:", err);
+      mostrarAlerta(alertBox, err.message || String(err), "error");
       btn.disabled = false; btn.textContent = "Crear cuenta";
     }
   });
+
+  // DIAGNÓSTICO
+  window.diagnosticar = async function () {
+    diagBox.classList.remove("hidden");
+    diagBox.innerHTML = '<div class="card"><div class="text-muted"><span class="spinner"></span> Probando configuración...</div></div>';
+
+    const check = [];
+
+    // 1. Config válido
+    check.push({
+      nombre: "firebaseConfig con credenciales reales",
+      ok: CONFIG_OK,
+      detalle: CONFIG_OK ? `Project ID: ${firebaseConfig.projectId}` : "Aún tiene valores placeholder (TU_...)"
+    });
+
+    // 2. Auth habilitado
+    try {
+      // Intentamos un sign-in con credenciales falsas; si Auth no está habilitado, da otro código
+      await auth.signInWithEmailAndPassword("diagnostico_" + Date.now() + "@test.test", "xxxxxx");
+      check.push({ nombre: "Authentication habilitado", ok: true, detalle: "Respondió correctamente" });
+    } catch (e) {
+      const ok = !["auth/configuration-not-found", "auth/operation-not-allowed", "auth/invalid-api-key", "auth/api-key-not-valid"].includes(e.code);
+      let detalle = `Código: ${e.code || "(sin código)"}`;
+      if (e.code === "auth/configuration-not-found") detalle += " — Authentication no está habilitado. Ve a Firebase → Authentication → Get started.";
+      else if (e.code === "auth/operation-not-allowed") detalle += " — Email/Password no está habilitado. Ve a Authentication → Sign-in method → Email/Password → Enable.";
+      else if (e.code === "auth/invalid-api-key" || e.code === "auth/api-key-not-valid") detalle += " — La API key es inválida.";
+      else if (e.code === "auth/user-not-found" || e.code === "auth/invalid-credential" || e.code === "auth/wrong-password") detalle = "OK (rechazó credenciales falsas como se esperaba)";
+      check.push({ nombre: "Authentication habilitado", ok, detalle });
+    }
+
+    // 3. Firestore lectura
+    try {
+      await db.collection("__diag__").limit(1).get();
+      check.push({ nombre: "Firestore lectura", ok: true, detalle: "Base de datos responde" });
+    } catch (e) {
+      let detalle = `Código: ${e.code || "(sin código)"} — ${e.message}`;
+      if (e.code === "permission-denied") detalle = "Reglas bloquean. Copia las reglas del README.";
+      else if (e.code === "unavailable" || e.code === "not-found") detalle = "Firestore no está creado. Ve a Firebase → Firestore Database → Create database.";
+      check.push({ nombre: "Firestore lectura", ok: false, detalle });
+    }
+
+    const rows = check.map(c => `
+      <div style="padding:10px 0; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:flex-start;">
+        <span style="font-size:18px; line-height:1;">${c.ok ? "✅" : "❌"}</span>
+        <div style="flex:1;">
+          <div style="font-weight:600;">${c.nombre}</div>
+          <div class="text-muted text-sm" style="font-family:var(--mono); margin-top:2px;">${c.detalle}</div>
+        </div>
+      </div>
+    `).join("");
+
+    diagBox.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Diagnóstico de configuración</div>
+          <div class="card-sub">Abre la consola del navegador (F12) para ver más detalles.</div>
+        </div>
+        ${rows}
+      </div>`;
+  };
 </script>
 
 </body>
 </html>
+
