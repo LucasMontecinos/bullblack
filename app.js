@@ -286,18 +286,37 @@ async function getUserProfileAwait(uid, maxIntentos = 12) {
 }
 
 /**
- * Auto-recuperación: si un usuario tiene cuenta en Auth pero no tiene
- * perfil en Firestore (por un registro previo fallido), este helper
- * reconstruye el perfil al vuelo durante el login.
+ * Auto-recuperación y sincronización de rol.
+ * - Si la cuenta no tiene perfil en Firestore, lo crea al vuelo.
+ * - Si el correo coincide con ADMIN_EMAIL y el perfil existente no es admin,
+ *   lo asciende automáticamente (maneja el caso de haber registrado antes de
+ *   definir correctamente ADMIN_EMAIL).
  */
 async function ensureProfile(user) {
-  const existing = await getUserProfile(user.uid);
-  if (existing) return existing;
+  const email = (user.email || "").toLowerCase();
+  const shouldBeAdmin = (email === ADMIN_EMAIL.toLowerCase());
 
+  const existing = await getUserProfile(user.uid);
+
+  if (existing) {
+    // Ascender a admin si el correo coincide y el rol actual no lo es
+    if (shouldBeAdmin && existing.rol !== "admin") {
+      console.log("[ensureProfile] correo coincide con ADMIN_EMAIL; ascendiendo a admin...");
+      try {
+        await db.collection("users").doc(user.uid).update({ rol: "admin" });
+        return { ...existing, rol: "admin" };
+      } catch (e) {
+        console.error("[ensureProfile] no se pudo actualizar rol:", e);
+        return existing; // devolvemos lo que haya
+      }
+    }
+    return existing;
+  }
+
+  // No existe perfil → crearlo
   console.warn("[ensureProfile] cuenta sin perfil en Firestore. Auto-recuperando...");
 
-  const email = (user.email || "").toLowerCase();
-  const rol = (email === ADMIN_EMAIL.toLowerCase()) ? "admin" : "cliente";
+  const rol = shouldBeAdmin ? "admin" : "cliente";
 
   // Base para el nombre distintivo: lo que tenga en Auth, o el prefijo del correo
   let baseDisplay = (user.displayName || email.split("@")[0] || "usuario").trim();
