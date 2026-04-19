@@ -28,7 +28,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
 // Correo del administrador (BullBlack) — actualizar cuando lo tengas
-const ADMIN_EMAIL = "admin@bullblack.cl"; // TODO: reemplazar
+const ADMIN_EMAIL = "lucas.montecinos.alarcon@gmail.com"; // TODO: reemplazar
 
 // EmailJS — https://www.emailjs.com (plan gratuito 200/mes)
 const EMAILJS_CONFIG = {
