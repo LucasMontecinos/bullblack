@@ -21,9 +21,9 @@ const firebaseConfig = {
 const ADMIN_EMAIL = "lucas.montecinos.alarcon@gmail.com"; // TODO: reemplazar
 // EmailJS — https://www.emailjs.com (plan gratuito 200/mes)
 const EMAILJS_CONFIG = {
-  publicKey: "TU_EMAILJS_PUBLIC_KEY",
-  serviceId: "TU_EMAILJS_SERVICE_ID",
-  templateId: "TU_EMAILJS_TEMPLATE_ID"
+  publicKey: "1DnH2s12z4OSuOnCj",
+  serviceId: "service_3q6xrk5",
+  templateId: "template_nj8mcan"
 };
 
 // ---------------------------------------------------------------------------
