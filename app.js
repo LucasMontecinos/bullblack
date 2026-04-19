@@ -492,8 +492,20 @@ function requireAuth(callback) {
       window.location.href = "index.html";
       return;
     }
-    const profile = await getUserProfileAwait(user.uid);
-    callback(user, profile);
+    try {
+      let profile = await getUserProfileAwait(user.uid);
+      if (!profile) {
+        console.warn("[requireAuth] sin perfil, auto-recuperando...");
+        profile = await ensureProfile(user);
+      }
+      callback(user, profile);
+    } catch (e) {
+      console.error("[requireAuth] error:", e);
+      alert("No se pudo cargar tu perfil: " + (e.message || String(e)) +
+            "\n\nSerás devuelto al login. Si persiste, revisa las reglas de Firestore.");
+      try { await auth.signOut(); } catch {}
+      window.location.href = "index.html";
+    }
   });
 }
 
@@ -503,13 +515,24 @@ function requireAdmin(callback) {
       window.location.href = "index.html";
       return;
     }
-    const profile = await getUserProfileAwait(user.uid);
-    if (!profile || profile.rol !== "admin") {
-      alert("Acceso restringido: se requieren permisos de administrador.");
-      window.location.href = "reservar.html";
-      return;
+    try {
+      let profile = await getUserProfileAwait(user.uid);
+      if (!profile) {
+        console.warn("[requireAdmin] sin perfil, auto-recuperando...");
+        profile = await ensureProfile(user);
+      }
+      if (!profile || profile.rol !== "admin") {
+        alert("Acceso restringido: se requieren permisos de administrador.");
+        window.location.href = "reservar.html";
+        return;
+      }
+      callback(user, profile);
+    } catch (e) {
+      console.error("[requireAdmin] error:", e);
+      alert("No se pudo cargar tu perfil: " + (e.message || String(e)));
+      try { await auth.signOut(); } catch {}
+      window.location.href = "index.html";
     }
-    callback(user, profile);
   });
 }
 

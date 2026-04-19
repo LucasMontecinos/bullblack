@@ -227,10 +227,14 @@
     confirmBtn.innerHTML = '<span class="spinner"></span> Reservando...';
 
     try {
+      // Fallback defensivo por si el perfil no cargó
+      const displayName = currentProfile?.displayName || currentUser.displayName || currentUser.email;
+      const email = currentProfile?.email || currentUser.email;
+
       await crearCita({
         uid: currentUser.uid,
-        displayName: currentProfile.displayName,
-        email: currentProfile.email,
+        displayName,
+        email,
         fecha: fechaInput.value,
         hora: slotSeleccionado,
         tipo: document.getElementById("tipo").value,
