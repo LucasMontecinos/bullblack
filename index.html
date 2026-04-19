@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BullBlack · Reserva de Visitas</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="auth-page">
+  <div class="auth-box">
+
+    <div class="auth-logo">
+      <div class="auth-logo-mark">
+        <span class="brand-mark">B</span>
+        <span>BULL<span class="brand-accent">BLACK</span></span>
+      </div>
+      <div class="auth-logo-sub">Automatización · Seguridad</div>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Iniciar sesión</button>
+        <button class="tab" data-tab="register">Registrarse</button>
+      </div>
+
+      <div id="alert-box"></div>
+
+      <!-- LOGIN -->
+      <form id="login-form" class="tab-panel">
+        <div class="field">
+          <label class="field-label">Correo o nombre distintivo</label>
+          <input type="text" id="login-id" placeholder="edificio-cordillera  o  correo@ejemplo.cl" required autocomplete="username" />
+          <div class="field-hint">Puedes ingresar con tu correo o con el nombre que registraste.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Contraseña</label>
+          <input type="password" id="login-pass" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">Entrar</button>
+      </form>
+
+      <!-- REGISTER -->
+      <form id="register-form" class="tab-panel hidden">
+        <div class="field">
+          <label class="field-label">Nombre distintivo</label>
+          <input type="text" id="reg-name" placeholder="Ej: Edificio Cordillera · Dpto 402 · Juan Pérez" required />
+          <div class="field-hint">Cómo quieres identificarte (edificio, departamento, empresa o persona natural). Debe ser único.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Correo electrónico</label>
+          <input type="email" id="reg-email" placeholder="tu@correo.cl" required autocomplete="email" />
+        </div>
+
+        <div class="field">
+          <label class="field-label">Contraseña</label>
+          <input type="password" id="reg-pass" placeholder="Mínimo 6 caracteres" required minlength="6" autocomplete="new-password" />
+        </div>
+
+        <div class="field">
+          <label class="field-label">Confirmar contraseña</label>
+          <input type="password" id="reg-pass2" placeholder="Repite la contraseña" required minlength="6" autocomplete="new-password" />
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="reg-btn">Crear cuenta</button>
+      </form>
+    </div>
+
+    <p class="text-muted text-sm mt-6" style="text-align:center;">
+      Servicio de visitas técnicas · Lun–Dom · 07:30 – 20:00
+    </p>
+
+  </div>
+</div>
+
+<!-- Firebase compat SDK (funciona 100% en GitHub Pages) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<!-- EmailJS -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="app.js"></script>
+
+<script>
+  const tabs       = document.querySelectorAll(".tab");
+  const loginForm  = document.getElementById("login-form");
+  const regForm    = document.getElementById("register-form");
+  const alertBox   = document.getElementById("alert-box");
+
+  tabs.forEach(t => t.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    limpiarAlerta(alertBox);
+    if (t.dataset.tab === "login") {
+      loginForm.classList.remove("hidden");
+      regForm.classList.add("hidden");
+    } else {
+      regForm.classList.remove("hidden");
+      loginForm.classList.add("hidden");
+    }
+  }));
+
+  // Si ya está autenticado, redirige
+  auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      const profile = await getUserProfileAwait(user.uid);
+      if (profile && profile.rol === "admin") {
+        window.location.href = "admin.html";
+      } else {
+        window.location.href = "reservar.html";
+      }
+    }
+  });
+
+  // LOGIN
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    limpiarAlerta(alertBox);
+    const btn = document.getElementById("login-btn");
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Entrando...';
+    try {
+      const id = document.getElementById("login-id").value;
+      const pass = document.getElementById("login-pass").value;
+      await loginFlexible(id, pass);
+      // onAuthStateChanged redirige
+    } catch (err) {
+      let msg = err.message;
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        msg = "Contraseña incorrecta.";
+      } else if (err.code === "auth/user-not-found") {
+        msg = "No existe una cuenta con ese correo.";
+      } else if (err.code === "auth/too-many-requests") {
+        msg = "Demasiados intentos. Espera unos minutos.";
+      }
+      mostrarAlerta(alertBox, msg, "error");
+      btn.disabled = false; btn.textContent = "Entrar";
+    }
+  });
+
+  // REGISTER
+  regForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    limpiarAlerta(alertBox);
+    const btn = document.getElementById("reg-btn");
+
+    const name  = document.getElementById("reg-name").value.trim();
+    const email = document.getElementById("reg-email").value.trim();
+    const pass  = document.getElementById("reg-pass").value;
+    const pass2 = document.getElementById("reg-pass2").value;
+
+    if (pass !== pass2) {
+      mostrarAlerta(alertBox, "Las contraseñas no coinciden.", "error");
+      return;
+    }
+    if (name.length < 3) {
+      mostrarAlerta(alertBox, "El nombre distintivo debe tener al menos 3 caracteres.", "error");
+      return;
+    }
+
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creando...';
+    try {
+      await registrarCliente({ email, password: pass, displayName: name });
+      // onAuthStateChanged redirige
+    } catch (err) {
+      let msg = err.message;
+      if (err.code === "auth/email-already-in-use") {
+        msg = "Ese correo ya está registrado. Intenta iniciar sesión.";
+      } else if (err.code === "auth/weak-password") {
+        msg = "La contraseña es muy débil (mínimo 6 caracteres).";
+      } else if (err.code === "auth/invalid-email") {
+        msg = "El correo ingresado no es válido.";
+      }
+      mostrarAlerta(alertBox, msg, "error");
+      btn.disabled = false; btn.textContent = "Crear cuenta";
+    }
+  });
+</script>
+
+</body>
+</html>

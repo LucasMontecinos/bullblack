@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel Admin · BullBlack</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="shell nav-inner">
+    <a href="admin.html" class="brand">
+      <span class="brand-mark">B</span>
+      <span>BULL<span class="brand-accent">BLACK</span></span>
+      <span class="nav-user" style="margin-left:8px;">ADMIN</span>
+    </a>
+    <div class="nav-links">
+      <a href="admin.html" class="nav-link active">Panel</a>
+      <a href="reservar.html" class="nav-link">Reservar</a>
+      <span id="user-label" class="nav-user">—</span>
+      <button class="btn btn-ghost btn-sm" onclick="logout()">Salir</button>
+    </div>
+  </div>
+</nav>
+
+<header class="page-head">
+  <div class="shell">
+    <div class="page-kicker">// Panel de control</div>
+    <h1 class="page-title">Agenda <span class="brand-accent">BullBlack</span></h1>
+    <p class="page-sub">Todas las visitas registradas por clientes. Gestiona estados, cancela reservas y agrega citas al calendario.</p>
+  </div>
+</header>
+
+<main class="shell">
+
+  <div id="alert-box" class="mt-6"></div>
+
+  <!-- Stats -->
+  <div class="stat-grid mt-8">
+    <div class="stat-card">
+      <div class="stat-label">Hoy</div>
+      <div class="stat-value stat-accent" id="stat-hoy">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Esta semana</div>
+      <div class="stat-value" id="stat-semana">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Pendientes</div>
+      <div class="stat-value" id="stat-pendientes">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Confirmadas</div>
+      <div class="stat-value" id="stat-confirmadas">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total</div>
+      <div class="stat-value" id="stat-total">0</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head row-between">
+      <div>
+        <div class="card-title">Reservas</div>
+        <div class="card-sub">Filtra por estado o fecha. Click en "Calendar" para agregar la cita a Google Calendar.</div>
+      </div>
+      <div class="row">
+        <select id="filtro-estado" style="width:auto;">
+          <option value="todas">Todas</option>
+          <option value="futuras" selected>Futuras</option>
+          <option value="pendiente">Pendientes</option>
+          <option value="confirmada">Confirmadas</option>
+          <option value="cancelada">Canceladas</option>
+          <option value="completada">Completadas</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="cargar()">Actualizar</button>
+      </div>
+    </div>
+
+    <div id="tabla-container">
+      <div class="text-muted" style="padding:20px;"><span class="spinner"></span> Cargando...</div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="foot">
+  <div class="shell">BULLBLACK · PANEL ADMINISTRATIVO</div>
+</footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="app.js"></script>
+
+<script>
+  let todas = [];
+  const alertBox = document.getElementById("alert-box");
+  const tablaContainer = document.getElementById("tabla-container");
+  const filtroEstado = document.getElementById("filtro-estado");
+
+  requireAdmin(async (user, profile) => {
+    document.getElementById("user-label").textContent =
+      profile ? profile.displayName : user.email;
+    await cargar();
+  });
+
+  async function cargar() {
+    tablaContainer.innerHTML = '<div class="text-muted" style="padding:20px;"><span class="spinner"></span> Cargando...</div>';
+    try {
+      todas = await getTodasLasCitas();
+      renderStats();
+      renderTabla();
+    } catch (err) {
+      tablaContainer.innerHTML = `<div class="alert alert-error">Error: ${err.message}</div>`;
+    }
+  }
+
+  filtroEstado.addEventListener("change", renderTabla);
+
+  function renderStats() {
+    const hoy = formatearFecha(new Date());
+    const hoyCount = todas.filter(c => c.fecha === hoy && c.estado !== "cancelada").length;
+
+    const finSemana = new Date();
+    finSemana.setDate(finSemana.getDate() + 7);
+    const finSemanaStr = formatearFecha(finSemana);
+    const semanaCount = todas.filter(c =>
+      c.fecha >= hoy && c.fecha <= finSemanaStr && c.estado !== "cancelada"
+    ).length;
+
+    document.getElementById("stat-hoy").textContent = hoyCount;
+    document.getElementById("stat-semana").textContent = semanaCount;
+    document.getElementById("stat-pendientes").textContent =
+      todas.filter(c => c.estado === "pendiente").length;
+    document.getElementById("stat-confirmadas").textContent =
+      todas.filter(c => c.estado === "confirmada").length;
+    document.getElementById("stat-total").textContent = todas.length;
+  }
+
+  function renderTabla() {
+    const filtro = filtroEstado.value;
+    const hoy = formatearFecha(new Date());
+    const ahora = new Date();
+    const ahoraMin = `${String(ahora.getHours()).padStart(2,"0")}:${String(ahora.getMinutes()).padStart(2,"0")}`;
+
+    let citas = todas;
+    if (filtro === "futuras") {
+      citas = todas.filter(c =>
+        c.estado !== "cancelada" &&
+        (c.fecha > hoy || (c.fecha === hoy && c.hora >= ahoraMin))
+      );
+    } else if (filtro !== "todas") {
+      citas = todas.filter(c => c.estado === filtro);
+    }
+
+    // Ordenar ascendente si son futuras, descendente si no
+    if (filtro === "futuras") {
+      citas = citas.slice().sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+    }
+
+    if (citas.length === 0) {
+      tablaContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">◌</div>
+          <div>Sin resultados para el filtro seleccionado.</div>
+        </div>`;
+      return;
+    }
+
+    const tipos = {
+      revision: "Revisión",
+      implementacion: "Implementación",
+      mantenimiento: "Mantenimiento",
+      consulta: "Consulta"
+    };
+
+    const rows = citas.map(c => {
+      const calendarLink = generarLinkCalendar(c);
+      const puedeGestionar = c.estado !== "cancelada" && c.estado !== "completada";
+      return `
+        <tr>
+          <td class="text-mono">${c.fecha}<br><span class="text-muted text-sm">${c.hora}</span></td>
+          <td>
+            <strong>${c.displayName}</strong>
+            <div class="text-muted text-sm">${c.email}</div>
+          </td>
+          <td>${tipos[c.tipo] || c.tipo}</td>
+          <td class="text-muted text-sm" style="max-width:280px;">${(c.descripcion || "—")}</td>
+          <td>${renderBadge(c.estado)}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            <a href="${calendarLink}" target="_blank" class="btn btn-ghost btn-sm">📅 Calendar</a>
+            ${puedeGestionar ? `
+              <select class="btn-sm" onchange="cambiarEstado('${c.id}', this.value); this.value=''" style="width:auto; padding:6px 10px; font-size:12px;">
+                <option value="">Estado...</option>
+                <option value="confirmada">Confirmar</option>
+                <option value="completada">Marcar completada</option>
+                <option value="cancelada">Cancelar</option>
+              </select>
+            ` : ""}
+          </td>
+        </tr>`;
+    }).join("");
+
+    tablaContainer.innerHTML = `
+      <div style="overflow-x:auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Fecha / Hora</th>
+              <th>Cliente</th>
+              <th>Tipo</th>
+              <th>Descripción</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  window.cambiarEstado = async (citaId, nuevoEstado) => {
+    if (!nuevoEstado) return;
+    const accion = { confirmada: "confirmar", completada: "marcar completada", cancelada: "cancelar" }[nuevoEstado];
+    if (!confirm(`¿${accion.charAt(0).toUpperCase() + accion.slice(1)} esta visita?`)) return;
+    try {
+      if (nuevoEstado === "cancelada") {
+        await cancelarCita(citaId);
+      } else {
+        await cambiarEstadoCita(citaId, nuevoEstado);
+      }
+      mostrarAlerta(alertBox, `Estado actualizado: ${nuevoEstado}.`, "success");
+      await cargar();
+    } catch (err) {
+      mostrarAlerta(alertBox, err.message, "error");
+    }
+  };
+</script>
+
+</body>
+</html>

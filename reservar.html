@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reservar Visita · BullBlack</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="shell nav-inner">
+    <a href="reservar.html" class="brand">
+      <span class="brand-mark">B</span>
+      <span>BULL<span class="brand-accent">BLACK</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="reservar.html" class="nav-link active">Reservar</a>
+      <a href="mis-citas.html" class="nav-link">Mis visitas</a>
+      <span id="user-label" class="nav-user">—</span>
+      <button class="btn btn-ghost btn-sm" onclick="logout()">Salir</button>
+    </div>
+  </div>
+</nav>
+
+<header class="page-head">
+  <div class="shell">
+    <div class="page-kicker">// Agendar visita técnica</div>
+    <h1 class="page-title">Reserva una <span class="brand-accent">visita</span></h1>
+    <p class="page-sub">Selecciona la fecha y el horario que prefieras. Atendemos de <strong>07:30 a 20:00</strong> con intervalos de 30 minutos. Sin límite de reservas por día.</p>
+  </div>
+</header>
+
+<main class="shell">
+
+  <div id="alert-box" class="mt-6"></div>
+
+  <div class="book-grid">
+
+    <!-- COLUMNA IZQ: fecha + formulario -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Fecha y detalles</div>
+        <div class="card-sub">Elige el día y describe brevemente el servicio.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Fecha</label>
+        <div class="date-nav">
+          <button type="button" class="btn btn-ghost btn-sm" id="date-prev">←</button>
+          <input type="date" id="fecha" required />
+          <button type="button" class="btn btn-ghost btn-sm" id="date-next">→</button>
+        </div>
+        <div class="date-display text-muted text-sm" id="fecha-legible">—</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Tipo de servicio</label>
+        <select id="tipo" required>
+          <option value="revision">Revisión de sistema existente</option>
+          <option value="implementacion">Implementación de sistema nuevo</option>
+          <option value="mantenimiento">Mantenimiento preventivo</option>
+          <option value="consulta">Consulta técnica</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Descripción</label>
+        <textarea id="descripcion" placeholder="Cuéntanos qué necesitas revisar o instalar..."></textarea>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Horario seleccionado</label>
+        <div class="text-mono" id="slot-seleccionado" style="padding: 10px 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px;">
+          Ninguno
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-block mt-4" id="confirmar-btn" disabled>
+        Confirmar reserva
+      </button>
+    </div>
+
+    <!-- COLUMNA DER: grilla de slots -->
+    <div class="card">
+      <div class="card-head row-between">
+        <div>
+          <div class="card-title">Horarios disponibles</div>
+          <div class="card-sub" id="slot-sub">Selecciona una fecha</div>
+        </div>
+      </div>
+
+      <div id="slots-container"></div>
+
+      <div class="legend">
+        <span><span class="legend-dot dot-available"></span>Disponible</span>
+        <span><span class="legend-dot dot-selected"></span>Seleccionado</span>
+        <span><span class="legend-dot dot-taken"></span>Ocupado</span>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<footer class="foot">
+  <div class="shell">
+    BULLBLACK · AUTOMATIZACIÓN Y SEGURIDAD
+  </div>
+</footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="app.js"></script>
+
+<script>
+  let currentUser = null;
+  let currentProfile = null;
+  let slotSeleccionado = null;
+  let citasDelDia = [];
+
+  const fechaInput      = document.getElementById("fecha");
+  const fechaLegibleEl  = document.getElementById("fecha-legible");
+  const slotsContainer  = document.getElementById("slots-container");
+  const slotSub         = document.getElementById("slot-sub");
+  const slotSelDisplay  = document.getElementById("slot-seleccionado");
+  const confirmBtn      = document.getElementById("confirmar-btn");
+  const alertBox        = document.getElementById("alert-box");
+
+  // Init — fecha por defecto: hoy
+  const hoy = formatearFecha(new Date());
+  fechaInput.value = hoy;
+  fechaInput.min = hoy;
+
+  requireAuth(async (user, profile) => {
+    currentUser = user;
+    currentProfile = profile;
+    document.getElementById("user-label").textContent =
+      profile ? profile.displayName : user.email;
+    // Si es admin, redirigir a panel admin (pero permitir reservar también si quiere)
+    await cargarSlots();
+  });
+
+  fechaInput.addEventListener("change", cargarSlots);
+
+  document.getElementById("date-prev").addEventListener("click", () => {
+    const d = new Date(fechaInput.value + "T00:00");
+    d.setDate(d.getDate() - 1);
+    const nuevo = formatearFecha(d);
+    if (nuevo >= hoy) {
+      fechaInput.value = nuevo;
+      cargarSlots();
+    }
+  });
+
+  document.getElementById("date-next").addEventListener("click", () => {
+    const d = new Date(fechaInput.value + "T00:00");
+    d.setDate(d.getDate() + 1);
+    fechaInput.value = formatearFecha(d);
+    cargarSlots();
+  });
+
+  async function cargarSlots() {
+    const fecha = fechaInput.value;
+    if (!fecha) return;
+    fechaLegibleEl.textContent = fechaLegible(fecha);
+    slotsContainer.innerHTML = '<div class="text-muted text-sm" style="padding:20px;"><span class="spinner"></span> Cargando horarios...</div>';
+    slotSeleccionado = null;
+    actualizarConfirmBtn();
+
+    try {
+      citasDelDia = await getCitasDeFecha(fecha);
+      renderSlots(fecha);
+    } catch (err) {
+      slotsContainer.innerHTML = `<div class="alert alert-error">Error cargando horarios: ${err.message}</div>`;
+    }
+  }
+
+  function renderSlots(fecha) {
+    const todos = generarSlots();
+    const ocupados = new Set(citasDelDia.map(c => c.hora));
+    slotSub.textContent = `${todos.length - ocupados.size} de ${todos.length} horarios libres`;
+
+    const grid = document.createElement("div");
+    grid.className = "slot-grid";
+
+    todos.forEach(hora => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "slot";
+      btn.textContent = hora;
+
+      if (horaYaPaso(fecha, hora)) {
+        btn.classList.add("slot-past");
+        btn.disabled = true;
+      } else if (ocupados.has(hora)) {
+        btn.classList.add("slot-taken");
+        btn.disabled = true;
+      } else {
+        btn.addEventListener("click", () => seleccionarSlot(hora, btn));
+      }
+      grid.appendChild(btn);
+    });
+
+    slotsContainer.innerHTML = "";
+    slotsContainer.appendChild(grid);
+  }
+
+  function seleccionarSlot(hora, btn) {
+    document.querySelectorAll(".slot-selected").forEach(s => s.classList.remove("slot-selected"));
+    btn.classList.add("slot-selected");
+    slotSeleccionado = hora;
+    slotSelDisplay.textContent = `${fechaInput.value} · ${hora}`;
+    actualizarConfirmBtn();
+  }
+
+  function actualizarConfirmBtn() {
+    confirmBtn.disabled = !slotSeleccionado;
+  }
+
+  confirmBtn.addEventListener("click", async () => {
+    if (!slotSeleccionado) return;
+    limpiarAlerta(alertBox);
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner"></span> Reservando...';
+
+    try {
+      await crearCita({
+        uid: currentUser.uid,
+        displayName: currentProfile.displayName,
+        email: currentProfile.email,
+        fecha: fechaInput.value,
+        hora: slotSeleccionado,
+        tipo: document.getElementById("tipo").value,
+        descripcion: document.getElementById("descripcion").value.trim()
+      });
+
+      mostrarAlerta(alertBox,
+        `Reserva confirmada para el ${fechaLegible(fechaInput.value)} a las ${slotSeleccionado}. Se envió la notificación al equipo BullBlack.`,
+        "success");
+
+      // Reset y recargar slots
+      slotSeleccionado = null;
+      slotSelDisplay.textContent = "Ninguno";
+      document.getElementById("descripcion").value = "";
+      await cargarSlots();
+
+      setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 100);
+    } catch (err) {
+      mostrarAlerta(alertBox, err.message, "error");
+    } finally {
+      confirmBtn.textContent = "Confirmar reserva";
+      actualizarConfirmBtn();
+    }
+  });
+</script>
+
+</body>
+</html>

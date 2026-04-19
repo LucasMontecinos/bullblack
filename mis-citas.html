@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mis visitas · BullBlack</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="shell nav-inner">
+    <a href="reservar.html" class="brand">
+      <span class="brand-mark">B</span>
+      <span>BULL<span class="brand-accent">BLACK</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="reservar.html" class="nav-link">Reservar</a>
+      <a href="mis-citas.html" class="nav-link active">Mis visitas</a>
+      <span id="user-label" class="nav-user">—</span>
+      <button class="btn btn-ghost btn-sm" onclick="logout()">Salir</button>
+    </div>
+  </div>
+</nav>
+
+<header class="page-head">
+  <div class="shell">
+    <div class="page-kicker">// Historial</div>
+    <h1 class="page-title">Mis <span class="brand-accent">visitas</span></h1>
+    <p class="page-sub">Todas tus reservas de servicio. Puedes cancelar visitas futuras con al menos 30 minutos de anticipación.</p>
+  </div>
+</header>
+
+<main class="shell">
+  <div id="alert-box" class="mt-6"></div>
+
+  <div class="card mt-6">
+    <div class="card-head row-between">
+      <div>
+        <div class="card-title">Registro de reservas</div>
+        <div class="card-sub" id="total-sub">—</div>
+      </div>
+      <a href="reservar.html" class="btn btn-primary btn-sm">+ Nueva visita</a>
+    </div>
+
+    <div id="tabla-container">
+      <div class="text-muted" style="padding:20px;"><span class="spinner"></span> Cargando...</div>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="shell">BULLBLACK · AUTOMATIZACIÓN Y SEGURIDAD</div>
+</footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="app.js"></script>
+
+<script>
+  let currentUser = null;
+  let currentProfile = null;
+
+  const alertBox       = document.getElementById("alert-box");
+  const tablaContainer = document.getElementById("tabla-container");
+  const totalSub       = document.getElementById("total-sub");
+
+  requireAuth(async (user, profile) => {
+    currentUser = user;
+    currentProfile = profile;
+    document.getElementById("user-label").textContent =
+      profile ? profile.displayName : user.email;
+    await cargar();
+  });
+
+  async function cargar() {
+    try {
+      const citas = await getCitasDeUsuario(currentUser.uid);
+      renderTabla(citas);
+    } catch (err) {
+      tablaContainer.innerHTML = `<div class="alert alert-error">Error: ${err.message}</div>`;
+    }
+  }
+
+  function puedeCancelarse(cita) {
+    if (cita.estado === "cancelada" || cita.estado === "completada") return false;
+    // Al menos 30 min antes
+    const [y, mo, d] = cita.fecha.split("-").map(Number);
+    const [h, m] = cita.hora.split(":").map(Number);
+    const fechaCita = new Date(y, mo - 1, d, h, m);
+    return (fechaCita.getTime() - Date.now()) > 30 * 60 * 1000;
+  }
+
+  function renderTabla(citas) {
+    totalSub.textContent = `${citas.length} reserva${citas.length === 1 ? "" : "s"} en total`;
+
+    if (citas.length === 0) {
+      tablaContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">◌</div>
+          <div>Aún no tienes reservas.</div>
+          <a href="reservar.html" class="btn btn-primary mt-4">Reservar primera visita</a>
+        </div>`;
+      return;
+    }
+
+    const tipos = {
+      revision: "Revisión",
+      implementacion: "Implementación",
+      mantenimiento: "Mantenimiento",
+      consulta: "Consulta"
+    };
+
+    const rows = citas.map(c => `
+      <tr>
+        <td class="text-mono">${c.fecha}<br><span class="text-muted text-sm">${c.hora}</span></td>
+        <td>${tipos[c.tipo] || c.tipo}</td>
+        <td class="text-muted text-sm">${(c.descripcion || "—").slice(0, 80)}${(c.descripcion||"").length > 80 ? "..." : ""}</td>
+        <td>${renderBadge(c.estado)}</td>
+        <td style="text-align:right;">
+          ${puedeCancelarse(c)
+            ? `<button class="btn btn-danger btn-sm" onclick="cancelar('${c.id}')">Cancelar</button>`
+            : `<span class="text-dim text-sm">—</span>`}
+        </td>
+      </tr>
+    `).join("");
+
+    tablaContainer.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Fecha / Hora</th>
+            <th>Tipo</th>
+            <th>Descripción</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  window.cancelar = async (citaId) => {
+    if (!confirm("¿Seguro que quieres cancelar esta visita?")) return;
+    try {
+      await cancelarCita(citaId);
+      mostrarAlerta(alertBox, "Visita cancelada correctamente.", "success");
+      await cargar();
+    } catch (err) {
+      mostrarAlerta(alertBox, err.message, "error");
+    }
+  };
+</script>
+
+</body>
+</html>
