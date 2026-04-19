@@ -6,15 +6,27 @@
 // ---------------------------------------------------------------------------
 // 1. CONFIGURACIÓN — reemplaza con tus credenciales
 // ---------------------------------------------------------------------------
+const firebaseConfig = // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyDtcevV_5Hal52mdNK1Am__aQ1l9Y1FyMo",
+  authDomain: "bullblack-visitas.firebaseapp.com",
+  projectId: "bullblack-visitas",
+  storageBucket: "bullblack-visitas.firebasestorage.app",
+  messagingSenderId: "319954973940",
+  appId: "1:319954973940:web:e22c96fa20596af6c9daa1",
+  measurementId: "G-5T4R7JJ0B4"
 };
 
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 // Correo del administrador (BullBlack) — actualizar cuando lo tengas
 const ADMIN_EMAIL = "admin@bullblack.cl"; // TODO: reemplazar
 
