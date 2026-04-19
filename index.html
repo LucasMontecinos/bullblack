@@ -123,18 +123,30 @@
 
   // Si ya está autenticado, redirige
   auth.onAuthStateChanged(async (user) => {
-    if (user) {
-      console.log("[authstate] usuario detectado:", user.email);
-      const profile = await getUserProfileAwait(user.uid);
+    if (!user) return;
+    console.log("[authstate] usuario detectado:", user.email);
+    try {
+      let profile = await getUserProfileAwait(user.uid);
       if (!profile) {
-        console.warn("[authstate] usuario sin perfil en Firestore. Permaneciendo en login.");
-        return;
+        console.warn("[authstate] sin perfil, intentando auto-recuperar...");
+        profile = await ensureProfile(user);
       }
       if (profile.rol === "admin") {
         window.location.href = "admin.html";
       } else {
         window.location.href = "reservar.html";
       }
+    } catch (e) {
+      console.error("[authstate] error cargando perfil:", e);
+      mostrarAlerta(alertBox,
+        "Sesión iniciada pero no se pudo cargar tu perfil: " + (e.message || String(e)) +
+        " — Revisa las reglas de Firestore (ver README).",
+        "error");
+      try { await auth.signOut(); } catch {}
+      const lb = document.getElementById("login-btn");
+      const rb = document.getElementById("reg-btn");
+      if (lb) { lb.disabled = false; lb.textContent = "Entrar"; }
+      if (rb) { rb.disabled = false; rb.textContent = "Crear cuenta"; }
     }
   });
 
@@ -144,11 +156,23 @@
     limpiarAlerta(alertBox);
     const btn = document.getElementById("login-btn");
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Entrando...';
+
+    // Timeout de seguridad: si en 15s no redirigió ni mostró error, desbloquear
+    const safetyTimeout = setTimeout(() => {
+      if (btn.disabled) {
+        btn.disabled = false; btn.textContent = "Entrar";
+        mostrarAlerta(alertBox,
+          "La operación tardó demasiado. Abre la consola (F12) o usa 🔧 Diagnóstico.",
+          "error");
+      }
+    }, 15000);
+
     try {
       const id = document.getElementById("login-id").value;
       const pass = document.getElementById("login-pass").value;
       await loginFlexible(id, pass);
     } catch (err) {
+      clearTimeout(safetyTimeout);
       console.error("[login form] error:", err);
       mostrarAlerta(alertBox, err.message || String(err), "error");
       btn.disabled = false; btn.textContent = "Entrar";

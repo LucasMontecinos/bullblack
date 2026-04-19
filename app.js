@@ -251,7 +251,10 @@ async function loginFlexible(identificador, password) {
   }
 
   try {
-    return await auth.signInWithEmailAndPassword(email, password);
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    // Auto-reparar perfil si la cuenta quedó huérfana de un registro previo fallido
+    await ensureProfile(cred.user);
+    return cred;
   } catch (e) {
     console.error("[login] error auth:", e);
     throw new Error(traducirErrorFirebase(e));
@@ -280,6 +283,58 @@ async function getUserProfileAwait(uid, maxIntentos = 12) {
     await new Promise(r => setTimeout(r, 250));
   }
   return null;
+}
+
+/**
+ * Auto-recuperación: si un usuario tiene cuenta en Auth pero no tiene
+ * perfil en Firestore (por un registro previo fallido), este helper
+ * reconstruye el perfil al vuelo durante el login.
+ */
+async function ensureProfile(user) {
+  const existing = await getUserProfile(user.uid);
+  if (existing) return existing;
+
+  console.warn("[ensureProfile] cuenta sin perfil en Firestore. Auto-recuperando...");
+
+  const email = (user.email || "").toLowerCase();
+  const rol = (email === ADMIN_EMAIL.toLowerCase()) ? "admin" : "cliente";
+
+  // Base para el nombre distintivo: lo que tenga en Auth, o el prefijo del correo
+  let baseDisplay = (user.displayName || email.split("@")[0] || "usuario").trim();
+  let displayName = baseDisplay;
+  let nombreKey = displayName.toLowerCase();
+
+  // Si ese nombre ya está tomado por otro usuario, añadir sufijo
+  for (let i = 1; i < 50; i++) {
+    const snap = await db.collection("nombresRegistrados").doc(nombreKey).get();
+    if (!snap.exists) break;
+    if (snap.data()?.uid === user.uid) break; // ya era suyo
+    displayName = `${baseDisplay}-${i}`;
+    nombreKey = displayName.toLowerCase();
+  }
+
+  try {
+    await db.collection("users").doc(user.uid).set({
+      email,
+      displayName,
+      displayNameKey: nombreKey,
+      rol,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      autoHealed: true
+    });
+
+    await db.collection("nombresRegistrados").doc(nombreKey).set({
+      email,
+      uid: user.uid,
+      displayName
+    });
+
+    console.log("[ensureProfile] ✓ perfil reconstruido. Rol:", rol, "Nombre:", displayName);
+    return { email, displayName, displayNameKey: nombreKey, rol };
+  } catch (e) {
+    console.error("[ensureProfile] falló creación:", e);
+    throw new Error("No se pudo crear tu perfil en la base de datos. " + traducirErrorFirebase(e));
+  }
 }
 
 // ---------------------------------------------------------------------------
