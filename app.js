@@ -7,17 +7,18 @@
 // 1. CONFIGURACIÓN — reemplaza con tus credenciales
 // ---------------------------------------------------------------------------
 const firebaseConfig = {
-  apiKey: "...",
+  apiKey: "AIzaSyDtcevV_5Hal52mdNK1Am__aQ1l9Y1FyMo",
   authDomain: "bullblack-visitas.firebaseapp.com",
+  databaseURL: "https://bullblack-visitas-default-rtdb.firebaseio.com",
   projectId: "bullblack-visitas",
-  storageBucket: "bullblack-visitas.appspot.com",
-  messagingSenderId: "...",
-  appId: "..."
+  storageBucket: "bullblack-visitas.firebasestorage.app",
+  messagingSenderId: "319954973940",
+  appId: "1:319954973940:web:e22c96fa20596af6c9daa1",
+  measurementId: "G-5T4R7JJ0B4"
 };
 
 // Correo del administrador (BullBlack) — actualizar cuando lo tengas
-const ADMIN_EMAIL = "admin@bullblack.cl"; // TODO: reemplazar
-
+const ADMIN_EMAIL = "lucas.montecinos.alarcon@gmail.com"; // TODO: reemplazar
 // EmailJS — https://www.emailjs.com (plan gratuito 200/mes)
 const EMAILJS_CONFIG = {
   publicKey: "TU_EMAILJS_PUBLIC_KEY",
